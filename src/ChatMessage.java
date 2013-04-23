@@ -12,53 +12,42 @@ import java.util.Date;
  */
 public class ChatMessage implements Serializable {
 
-	protected static final long serialVersionUID = 1112122200L;
-
-	// The different types of message sent by the Client
-	// WHOISIN to receive the list of the users connected
-	// MESSAGE an ordinary message
-	// LOGOUT to disconnect from the Server
-	// TYPING to display is typing message on other client
-	public static final int WHOISIN = 0, MESSAGE = 1, LOGOUT = 2, TYPING = 3, PEER = 4;
-	private int type;
-	private String peerhost, peerport, peerlocalport, peerlocalhost;
+	/**
+	 * 
+	 */
+	private static final long serialVersionUID = -5441462942685503565L;
+	
+	public enum Type{
+		WHOISIN, MESSAGE, LOGOUT, TYPING, PEER
+	}
+	private Type type;
 	private Date sent;
 	private String message, to, from;
 	private boolean isTyping;
-	private String username;
 	
-	// constructor
-	public ChatMessage(int type, String message) {
+	public ChatMessage(Type type, String message) {
+		sent = new Date();
 		this.type = type;
 		this.message = message;
 	}
-	public ChatMessage(String to, int type, String message, String from){
+	public ChatMessage(String to, Type type, String message, String from){
 		sent = new Date();
 		this.to = to;
 		this.from = from;
 		this.message = message;
 		this.type = type;
 	}
-	public ChatMessage(int type, boolean isTyping, String message) {
+	public ChatMessage(Type type, boolean isTyping, String message, String from) {
 		this.type = type;
 		this.isTyping = isTyping;
 		this.message = message;
-	}
-	public ChatMessage(int type, String host, String port, String lhost, String lport) {
-		this.type = type;
-		this.peerhost = host;
-		this.peerport = port;
-		this.peerlocalhost = lhost;
-		this.peerlocalport = lport;
+		this.from = from;
 	}
 	// getters
-	public int getType() {
+	public Type getType() {
 		return type;
 	}
-	public String[] getPeerConnection(){
-		return new String[]{peerhost, peerport, peerlocalhost, peerlocalport};
-	}
-	public Date getSentDate(){
+	public Date getSent(){
 		return sent;
 	}
 	public String getMessage() {
@@ -67,17 +56,11 @@ public class ChatMessage implements Serializable {
 	public boolean getTyping() {
 		return isTyping;
 	}
-	public String getUsername(){
-		return this.username;
-	}
 	public String getTo(){
 		return to;
 	}
 	public String getFrom(){
 		return from;
-	}
-	public void setUsername(String username){
-		this.username = username;
 	}
 }
 

@@ -37,9 +37,16 @@ public class Server {
 	 *  in console
 	 */
 	public Server(int port) {
-		/*
-		 * shutdown hook to do stuff before exiting
-		 */
+		shutdownhook();
+		this.port = port;
+		// ArrayList for the Client list
+		al = new ArrayList<ClientThread>();
+	}
+	/**
+	 * 
+	 * do stuff before exiting
+	 */
+	private void shutdownhook(){
 		final Thread mainThread = Thread.currentThread();
 		Runtime.getRuntime().addShutdownHook(new Thread() {
 			@Override
@@ -56,10 +63,6 @@ public class Server {
 				log(Level.INFO,"Done.");
 			}
 		});
-		this.port = port;
-		
-		// ArrayList for the Client list
-		al = new ArrayList<ClientThread>();
 	}
 	public void close(){
 		
@@ -77,7 +80,7 @@ public class Server {
 		try {
 			// the socket used by the server
 			ServerSocket serverSocket = new ServerSocket(port);
-			//15 second time-out on blocking during accept
+			//10 second time-out on blocking during accept
 			serverSocket.setSoTimeout(10000);
 			// infinite loop to wait for connections
 			log(Level.INFO,"Server waiting for Clients on port " + port + ".");
@@ -131,7 +134,7 @@ public class Server {
 		}
 		log(Level.OFF,"Terminated\n");
 	}		
-	/*
+	/**
 	 * log errors/messages
 	 */
 	private static void initLog() {
@@ -152,7 +155,7 @@ public class Server {
 	private static void log(Level level, String msg) {
 		LOGGER.log(level,msg);
 	}
-	/*
+	/**
 	 *  to broadcast a message to all Clients
 	 */
 	private synchronized void broadcast(String message) {
@@ -165,20 +168,13 @@ public class Server {
 		for(int i = al.size(); --i >= 0;) {
 			ClientThread ct = al.get(i);
 			// try to write to the Client if it fails remove it from the list
-			if(!ct.writeMsg(new ChatMessage(ChatMessage.MESSAGE, messageOut))) {
+			if(!ct.writeMsg(new ChatMessage(ChatMessage.Type.MESSAGE, messageOut))) {
 				al.remove(i);
 			}
 		}
-	}
+	}	 
 	private synchronized void broadcastExceptFor(int id, ChatMessage cm) {
-		
 		for(int i = al.size(); --i >= 0;) {
-			if(al.get(i).id == id){
-				cm.setUsername(al.get(i).username);
-			}
-		}
-		for(int i = al.size(); --i >= 0;) {
-			
 			if(al.get(i).id != id){
 				ClientThread ct = al.get(i);
 				// try to write to the Client if it fails remove it from the list
@@ -189,7 +185,6 @@ public class Server {
 			
 		}
 	}
-
 	// for a client who logoff using the LOGOUT message
 	synchronized void remove(int id) {
 		// scan the array list until we found the Id
@@ -295,33 +290,32 @@ public class Server {
 				}
 				// the messaage part of the ChatMessage
 				String message = cm.getMessage();
-
 				// Switch on the type of message receive
 				switch(cm.getType()) {
 
-				case ChatMessage.MESSAGE:
+				case MESSAGE:
 					broadcast(username + ": " + message);
 					break;
-				case ChatMessage.LOGOUT:
+				case LOGOUT:
 					//display(username + " disconnected with a LOGOUT message.");
 					keepGoing = false;
 					break;
-				case ChatMessage.TYPING:
+				case TYPING:
 					broadcastExceptFor(id, cm);
 					break;
-				case ChatMessage.WHOISIN:
-					writeMsg(new ChatMessage(ChatMessage.MESSAGE, "List of the users connected at " + dateFormat.format(new Date()) + "\n"));
+				case WHOISIN:
+					writeMsg(new ChatMessage(ChatMessage.Type.MESSAGE, "List of the users connected at " + dateFormat.format(new Date()) + "\n"));
 					// scan al the users connected
 					for(int i = 0; i < al.size(); ++i) {
 						ClientThread ct = al.get(i);
-						writeMsg(new ChatMessage(ChatMessage.MESSAGE,(i+1) + ") " + ct.username + " online for " + (int)((new Date().getTime() - ct.date.getTime())/1000) + " seconds \n"));
+						writeMsg(new ChatMessage(ChatMessage.Type.MESSAGE,(i+1) + ") " + ct.username + " online for " + (int)((new Date().getTime() - ct.date.getTime())/1000) + " seconds \n"));
 					}
 					break;
 				}
 			}
 			// remove self from the arrayList containing the list of the
 			// connected Clients
-			broadcast(username + " disconnected");
+			broadcastExceptFor(id, new ChatMessage(ChatMessage.Type.MESSAGE, username + " disconnected"));
 			remove(id);
 			close();
 		}
@@ -363,10 +357,10 @@ public class Server {
 			try {
 				sOutput.writeObject(message);
 			}
-			// if an error occurs, do not abort just inform the user
 			catch(IOException e) {
 				log(Level.SEVERE,"Error sending message to " + username);
 				log(Level.SEVERE,e.toString());
+				return false;
 			}
 			return true;
 		}
