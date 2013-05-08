@@ -17,26 +17,24 @@ import java.util.logging.Logger;
 import java.util.logging.SimpleFormatter;
 /*
  * server to run in background
- * -output to logfile
+ * output to logfile
  */
 public class Server {
 	private final static Logger LOGGER = Logger.getLogger(Server.class .getName());
 	private static FileHandler fileTxt;
 	private static SimpleFormatter formatterTxt;
-	
+	private int port;
 	private static int connectionId = 0;
-	// an ArrayList to keep the list of the Client
-	private ArrayList<ClientThread> connectedList;
+	// List of clients
+	private ArrayList<Client> connectedList;
 	private double version = 2.00;
 	/****************************************************
 	 * v2.0 
 	 * new protocol
 	 * bug fixes and optimizations
 	 * new commands
+	 * cleanup
 	 ****************************************************/
-	// to display time
-	private int port;
-	// the boolean that will be turned of to stop the server
 	public volatile boolean keepGoing;
 
 	/*
@@ -47,7 +45,7 @@ public class Server {
 		shutdownhook();
 		this.port = port;
 		// ArrayList for the Client list
-		connectedList = new ArrayList<ClientThread>();
+		connectedList = new ArrayList<Client>();
 	}
 	private boolean validate(String s, PrintWriter out){
 		/*
@@ -85,8 +83,8 @@ public class Server {
 		});
 	}
 	public void close(){
-		for(int i = 0; i < connectedList.size(); ++i) {
-			ClientThread tc = connectedList.get(i);
+		for(int i = 0; i < connectedList.size(); i++) {
+			Client tc = connectedList.get(i);
 			try {
 				tc.in.close();
 				tc.out.close();
@@ -132,7 +130,7 @@ public class Server {
 					if(!keepGoing)
 						break;
 					
-					ClientThread t = new ClientThread(socket);  // make a thread of it
+					Client t = new Client(socket, connectionId++);  // make a thread of it
 					connectedList.add(t);						// save it in the ArrayList
 				}
 				try {
@@ -182,23 +180,23 @@ public class Server {
 	/**
 	 *  to broadcast a message to all Clients
 	 */
-	private synchronized void broadcast(String message) {
+	private synchronized void broadcast(boolean b, char code, String message) {
 		// we loop in reverse order in case we would have to remove a Client
 		// because it has disconnected
-		for(int i = connectedList.size(); --i >= 0;) {
-			ClientThread ct = connectedList.get(i);
+		for(int i = connectedList.size() - 1; i >= 0; i--){
+			Client ct = connectedList.get(i);
 			// try to write to the Client if it fails remove it from the list
-			if(!ct.send(message)) {
+			if(!ct.send(b, code, message)) {
 				connectedList.remove(i);
 			}
 		}
 	}	 
-	private synchronized void broadcastExceptFor(int id, String message) {
-		for(int i = connectedList.size(); --i >= 0;) {
+	private synchronized void broadcastExceptFor(boolean b, int id, char code, String message) {
+		for(int i = connectedList.size() - 1; i >= 0; i--) {
 			if(connectedList.get(i).id != id){
-				ClientThread ct = connectedList.get(i);
+				Client ct = connectedList.get(i);
 				// try to write to the Client if it fails remove it from the list
-				if(!ct.send(message)) {
+				if(!ct.send(b, code, message)) {
 					connectedList.remove(i);
 				}
 			}
@@ -208,8 +206,8 @@ public class Server {
 	// for a client who logoff using the LOGOUT message
 	synchronized void remove(int id) {
 		// scan the array list until we found the Id
-		for(int i = 0; i < connectedList.size(); ++i) {
-			ClientThread ct = connectedList.get(i);
+		for(int i = 0; i < connectedList.size(); i++) {
+			Client ct = connectedList.get(i);
 			// found it
 			if(ct.id == id) {
 				connectedList.remove(i);
@@ -219,9 +217,8 @@ public class Server {
 	}
 	
 	/*
-	 *  To run as a console application just open a console window and: 
 	 * > java Server
-	 * > java Server portNumber
+	 * > java Server [portNumber]
 	 * If the port number is not specified 1500 is used
 	 */ 
 	public static void main(String[] args) {
@@ -249,37 +246,40 @@ public class Server {
 		server.start();
 		
 	}
-	/*
+	public static String booleanValue(boolean b){
+		if (b) return "on";
+		else   return "off";
+	}
+	/**
 	 * pretty much does all the work in here
 	 */
-	class ClientThread extends Thread {
+	class Client extends Thread {
 		// the socket where to listen/talk
+		boolean keepGoing = true;
 		Socket socket;
 		BufferedReader in;
 		PrintWriter out;
+		Date date;
+		boolean realtime = false;
 		// my unique id (easier for disconnection)
 		int id;
 		// the Username of the Client
 		String username = "";
-		// the only type of message a will receive
-		// the date I connect
-		Date date;
 		SimpleDateFormat dateFormat = new SimpleDateFormat("h:mm:ss");
 
-		// Constructor
-		ClientThread(Socket socket) {
+		public Client(Socket socket, int id) {
 			// give each a unique id
-			id = ++connectionId;
+			this.id = id;
+			this.date = new Date();
 			this.socket = socket;
-			try
-			{
+			try{
 				// create output first
 				out = new PrintWriter(socket.getOutputStream(), true);
 				in  = new BufferedReader(new InputStreamReader(socket.getInputStream()));
 				this.username = in.readLine();
 				if(!validate(username, out)){
 					remove(id);
-					close();
+					disconnect();
 					return;
 				}
 				
@@ -292,10 +292,8 @@ public class Server {
 			}
 		}
 		// run forever
-		public void run() {
-			// to loop until LOGOUT
-			boolean keepGoing = true;
-			//broadcast(username + " connected");
+		public void run() {			
+			broadcastExceptFor(true, id, '0', username + " connected");
 			while(keepGoing) {
 				// read a String (which is an object)
 				/*TODO: FUNCTify */
@@ -305,18 +303,33 @@ public class Server {
 					System.out.println(line);
 					switch(line.charAt(0)){
 						case '0': // message
-							broadcast(username + ": " + line.substring(1));
+							broadcast(true, '0', username + ": " + line.substring(1));
 							break;
-						case '1':
+						case '1': //logout;
 							keepGoing = false;
-							//logout;
+							broadcastExceptFor(true, id, '0', username + " disconnected");
 							break;
 							/*
 							 * commands flag to method to clean this up
 							 */
+						case '2': // isTyping
+							if(line.charAt(1) == '0'){ // done typing
+								broadcastExceptFor(false, id, '2', "0");
+							}
+							else{ //is typing
+								if(realtime) broadcastExceptFor(false, id, '2', "1" + username + ": " + line.substring(2) + "...");
+								else broadcastExceptFor(false, id, '2', "1" + username + " is typing...");
+							}
+							break;
+						case '3': // enable/disable realtime
+							realtime = line.charAt(1) == '1';
+							send(true, '0', "Realtime " + booleanValue(realtime));
+							break;
+						case '4': //whoisin
+							whoisin();
+							break;
 						default:
-							
-							send("command not understood: " + line);
+							send(false, 'E', "command not understood: " + line);
 							break;
 					}
 					
@@ -327,15 +340,12 @@ public class Server {
 					break;				
 				}
 			}
-			// remove self from the arrayList containing the list of the
-			// connected Clients
-			broadcastExceptFor(id, username + " disconnected");
-			remove(id);
-			close();
+			disconnect();
 		}
 		
 		// try to close everything
-		private void close() {
+		private void disconnect() {
+			remove(id);
 			try{	
 				if(socket != null) socket.setKeepAlive(false);
 			}
@@ -357,20 +367,30 @@ public class Server {
 			}
 			catch (Exception e) {}
 		}
+		private void whoisin(){
+			send(false, '0', "List of the users connected at " + dateFormat.format(new Date()));
+            // scan al the users connected
+            for(int i = 0; i < connectedList.size(); i++) {
+            	Client c = connectedList.get(i);
+                send(false, '0', c.username + " online for " + (int)((new Date().getTime() - c.date.getTime())/1000) + " seconds");
+            }
+		}
 
 		/*
 		 * Write a String to the Client output stream
 		 */
-		private boolean send(String s){
+		private boolean send(boolean includeDate, char code, String s){
 			if(!socket.isConnected()) {
-				close();
+				disconnect();
 				return false;
 			}
 			// add HH:mm:ss
-			String time = new SimpleDateFormat("h:mm:ss:").format(new Date());
-			out.println(time + s);
+			String time = "";
+			if(includeDate) time = new SimpleDateFormat("h:mm:ss: ").format(new Date());
+			out.println(code + time + s);
 			return true;
 		}
 
 	}
+	
 }
