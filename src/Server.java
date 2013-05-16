@@ -250,6 +250,26 @@ public class Server {
 		if (b) return "on";
 		else   return "off";
 	}
+	public static String keyUpdatify(String message, String s) {
+		if(s.charAt(0) == '+'){
+			message += s.substring(1);
+		}
+		else if(s.charAt(0) == '-'){
+			try{
+				int remove = Integer.parseInt(s.substring(1));
+				if(message.length() >= remove){
+					message  = message.substring(0, message.length() - remove);
+				}
+				else{
+					message = "";
+				}
+			}
+			catch(NumberFormatException nfr){
+				log(Level.SEVERE, nfr.toString());
+			}
+		}
+		return message;
+	}
 	/**
 	 * pretty much does all the work in here
 	 */
@@ -260,6 +280,7 @@ public class Server {
 		BufferedReader in;
 		PrintWriter out;
 		Date date;
+		String message = "";
 		boolean realtime = false;
 		// my unique id (easier for disconnection)
 		int id;
@@ -292,13 +313,14 @@ public class Server {
 			}
 		}
 		// run forever
+		
 		public void run() {			
 			broadcastExceptFor(true, id, '0', username + " connected");
 			while(keepGoing) {
 				// read a String (which is an object)
 				/*TODO: FUNCTify */
 				try {
-					String line = in.readLine();
+					String line = in.readLine(); //blocking
 					if(line == null) continue;
 					System.out.println(line);
 					switch(line.charAt(0)){
@@ -314,11 +336,15 @@ public class Server {
 							 */
 						case '2': // isTyping
 							if(line.charAt(1) == '0'){ // done typing
+								message = "";
 								broadcastExceptFor(false, id, '2', "0");
 							}
 							else{ //is typing
-								if(realtime) broadcastExceptFor(false, id, '2', "1" + username + ": " + line.substring(2) + "...");
-								else broadcastExceptFor(false, id, '2', "1" + username + " is typing...");
+								if(realtime){
+									message = keyUpdatify(message, line.substring(2));
+									broadcastExceptFor(false, id, '2', "1" + username + ": " + message);
+								}
+								else broadcastExceptFor(false, id, '2', "1" + username + " is typing.");
 							}
 							break;
 						case '3': // enable/disable realtime
@@ -342,7 +368,7 @@ public class Server {
 			}
 			disconnect();
 		}
-		
+
 		// try to close everything
 		private void disconnect() {
 			remove(id);
