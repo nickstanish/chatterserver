@@ -313,9 +313,16 @@ public class Server {
 			}
 		}
 		// run forever
-		
-		public void run() {			
-			broadcastExceptFor(true, id, '0', username + " connected");
+		public void broadcastContacts(){
+			String csv = ""; //comma separated values
+            for(int i = 0; i < connectedList.size(); i++) {
+            	csv += connectedList.get(i).username + ",";
+            }
+			broadcast(false, 'c',csv);
+		}
+		public void run() {
+			broadcastContacts();
+			//broadcastExceptFor(true, id, '0', username + " connected");
 			while(keepGoing) {
 				// read a String (which is an object)
 				/*TODO: FUNCTify */
@@ -329,7 +336,7 @@ public class Server {
 							break;
 						case '1': //logout;
 							keepGoing = false;
-							broadcastExceptFor(true, id, '0', username + " disconnected");
+							broadcastContacts();
 							break;
 							/*
 							 * commands flag to method to clean this up
