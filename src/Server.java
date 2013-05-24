@@ -130,7 +130,7 @@ public class Server {
 					if(!keepGoing)
 						break;
 					
-					Client t = new Client(socket, connectionId++);  // make a thread of it
+					Client t = new Client(socket);  // make a thread of it
 					connectedList.add(t);						// save it in the ArrayList
 				}
 				try {
@@ -180,19 +180,23 @@ public class Server {
 	/**
 	 *  to broadcast a message to all Clients
 	 */
-	private synchronized void broadcast(boolean b, char code, String message) {
+	private void broadcast(boolean b, char code, String message) {
 		// we loop in reverse order in case we would have to remove a Client
 		// because it has disconnected
-		for(int i = connectedList.size() - 1; i >= 0; i--){
-			Client ct = connectedList.get(i);
-			// try to write to the Client if it fails remove it from the list
-			if(!ct.send(b, code, message)) {
-				connectedList.remove(i);
+		synchronized(connectedList){
+			for(int i = connectedList.size() - 1; i >= 0; i--){
+				Client ct = connectedList.get(i);
+				// try to write to the Client if it fails remove it from the list
+				if(!ct.send(b, code, message)) {
+					connectedList.remove(i);
+				}
 			}
 		}
+		
 	}	 
-	private synchronized void broadcastExceptFor(boolean b, int id, char code, String message) {
-		for(int i = connectedList.size() - 1; i >= 0; i--) {
+	private void broadcastExceptFor(boolean b, int id, char code, String message) {
+		synchronized(connectedList){
+			for(int i = connectedList.size() - 1; i >= 0; i--) {
 			if(connectedList.get(i).id != id){
 				Client ct = connectedList.get(i);
 				// try to write to the Client if it fails remove it from the list
@@ -201,12 +205,15 @@ public class Server {
 				}
 			}
 			
+			}
 		}
+		
 	}
 	// for a client who logoff using the LOGOUT message
-	synchronized void remove(int id) {
+	private void remove(int id) {
 		// scan the array list until we found the Id
-		for(int i = 0; i < connectedList.size(); i++) {
+		synchronized(connectedList){
+			for(int i = 0; i < connectedList.size(); i++) {
 			Client ct = connectedList.get(i);
 			// found it
 			if(ct.id == id) {
@@ -214,8 +221,23 @@ public class Server {
 				return;
 			}
 		}
+		}
+		
 	}
-	
+	private void remove(Client c) {
+		// scan the array list until we found the Id
+		synchronized(connectedList){
+			for(int i = 0; i < connectedList.size(); i++) {
+			Client ct = connectedList.get(i);
+			// found it
+			if(ct == c) {
+				connectedList.remove(i);
+				return;
+			}
+		}
+		}
+		
+	}
 	/*
 	 * > java Server
 	 * > java Server [portNumber]
@@ -288,9 +310,8 @@ public class Server {
 		String username = "";
 		SimpleDateFormat dateFormat = new SimpleDateFormat("h:mm:ss");
 
-		public Client(Socket socket, int id) {
+		public Client(Socket socket) {
 			// give each a unique id
-			this.id = id;
 			this.date = new Date();
 			this.socket = socket;
 			try{
@@ -299,11 +320,11 @@ public class Server {
 				in  = new BufferedReader(new InputStreamReader(socket.getInputStream()));
 				this.username = in.readLine();
 				if(!validate(username, out)){
-					remove(id);
+					remove(this);
 					disconnect();
 					return;
 				}
-				
+				this.id = connectionId++;
 				log(Level.INFO,"connection accepted from " + socket.getInetAddress());
 				this.start();
 			}
@@ -313,15 +334,14 @@ public class Server {
 			}
 		}
 		// run forever
-		public void broadcastContacts(){
+		public void sendContacts(){
 			String csv = ""; //comma separated values
             for(int i = 0; i < connectedList.size(); i++) {
             	csv += connectedList.get(i).username + ",";
             }
-			broadcast(false, 'c',csv);
+			send(false, 'c',csv);
 		}
 		public void run() {
-			broadcastContacts();
 			//broadcastExceptFor(true, id, '0', username + " connected");
 			while(keepGoing) {
 				// read a String (which is an object)
@@ -336,7 +356,6 @@ public class Server {
 							break;
 						case '1': //logout;
 							keepGoing = false;
-							broadcastContacts();
 							break;
 							/*
 							 * commands flag to method to clean this up
@@ -360,6 +379,10 @@ public class Server {
 							break;
 						case '4': //whoisin
 							whoisin();
+							break;
+						case 'c':
+							//contacts
+							sendContacts();
 							break;
 						default:
 							send(false, 'E', "command not understood: " + line);
