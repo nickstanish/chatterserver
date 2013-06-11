@@ -309,6 +309,7 @@ public class Server {
 		// the Username of the Client
 		String username = "";
 		SimpleDateFormat dateFormat = new SimpleDateFormat("h:mm:ss");
+		ArrayList<Client> recents = new ArrayList<Client>();
 
 		public Client(Socket socket) {
 			// give each a unique id
@@ -380,6 +381,11 @@ public class Server {
 						case '4': //whoisin
 							whoisin();
 							break;
+						case '5': //to
+							String[] parts = line.substring(1).split(":", 2);
+							String to = parts[0];
+							String msg = parts[1];
+							sendTo(to,msg, username);
 						case 'c':
 							//contacts
 							sendContacts();
@@ -397,6 +403,38 @@ public class Server {
 				}
 			}
 			disconnect();
+		}
+		private void sendTo(String to, String message, String from){
+			Client c = null;
+			synchronized(recents){
+				for(int i = 0; i <  recents.size(); i++){
+					if(to.equalsIgnoreCase(recents.get(i).username)){
+						c = recents.get(i);
+					}
+				}
+				if(c == null){
+					synchronized(connectedList){
+						for(int i = connectedList.size() - 1; i >= 0; i--) {
+							if(connectedList.get(i).username.equalsIgnoreCase(to)){
+								c = connectedList.get(i);
+								recents.add(c);
+							}
+						}
+					}
+				}
+				if(c!= null){
+					// try to write to the Client if it fails remove it from the list
+					if(!c.send(true, '5', "PM "+ from + ": " + message)) {
+						connectedList.remove(c);
+						recents.remove(c);
+					}
+				}
+				else{
+					send(true, '0', "User not found");
+				}
+					
+			}
+			
 		}
 
 		// try to close everything
