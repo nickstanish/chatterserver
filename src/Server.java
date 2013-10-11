@@ -15,10 +15,11 @@ import java.util.logging.FileHandler;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import java.util.logging.SimpleFormatter;
-/*
- * server to run in background
- * output to logfile
- */
+
+import net.vizbits.chatterlib.Message;
+
+import com.google.gson.Gson;
+
 public class Server {
 	private final static Logger LOGGER = Logger.getLogger(Server.class .getName());
 	private static FileHandler fileTxt;
@@ -27,7 +28,7 @@ public class Server {
 	private static int connectionId = 0;
 	// List of clients
 	private ArrayList<Client> connectedList;
-	private double version = 2.00;
+	private double version = 2.01;
 	/****************************************************
 	 * v2.0 
 	 * new protocol
@@ -129,9 +130,14 @@ public class Server {
 					// if I was asked to stop
 					if(!keepGoing)
 						break;
+					try{
+						Client t = new Client(socket);  // make a thread of it
+						connectedList.add(t);						// save it in the ArrayList
+					}
+					catch(Exception e){
+						log(Level.WARNING, "did not connect");
+					}
 					
-					Client t = new Client(socket);  // make a thread of it
-					connectedList.add(t);						// save it in the ArrayList
 				}
 				try {
 					Thread.sleep(1000);
@@ -160,7 +166,8 @@ public class Server {
 	 * log errors/messages
 	 */
 	private static void initLog() {
-		File dir = new File("logs/");		
+		File dir = new File("logs/");
+		LOGGER.setUseParentHandlers(false);
 		LOGGER.setLevel(Level.ALL);
 		try {
 			dir.mkdirs();
@@ -177,67 +184,7 @@ public class Server {
 	private static void log(Level level, String msg) {
 		LOGGER.log(level,msg);
 	}
-	/**
-	 *  to broadcast a message to all Clients
-	 */
-	private void broadcast(boolean b, char code, String message) {
-		// we loop in reverse order in case we would have to remove a Client
-		// because it has disconnected
-		synchronized(connectedList){
-			for(int i = connectedList.size() - 1; i >= 0; i--){
-				Client ct = connectedList.get(i);
-				// try to write to the Client if it fails remove it from the list
-				if(!ct.send(b, code, message)) {
-					connectedList.remove(i);
-				}
-			}
-		}
-		
-	}	 
-	private void broadcastExceptFor(boolean b, int id, char code, String message) {
-		synchronized(connectedList){
-			for(int i = connectedList.size() - 1; i >= 0; i--) {
-			if(connectedList.get(i).id != id){
-				Client ct = connectedList.get(i);
-				// try to write to the Client if it fails remove it from the list
-				if(!ct.send(b, code, message)) {
-					connectedList.remove(i);
-				}
-			}
-			
-			}
-		}
-		
-	}
-	// for a client who logoff using the LOGOUT message
-	private void remove(int id) {
-		// scan the array list until we found the Id
-		synchronized(connectedList){
-			for(int i = 0; i < connectedList.size(); i++) {
-			Client ct = connectedList.get(i);
-			// found it
-			if(ct.id == id) {
-				connectedList.remove(i);
-				return;
-			}
-		}
-		}
-		
-	}
-	private void remove(Client c) {
-		// scan the array list until we found the Id
-		synchronized(connectedList){
-			for(int i = 0; i < connectedList.size(); i++) {
-			Client ct = connectedList.get(i);
-			// found it
-			if(ct == c) {
-				connectedList.remove(i);
-				return;
-			}
-		}
-		}
-		
-	}
+	
 	/*
 	 * > java Server
 	 * > java Server [portNumber]
@@ -268,36 +215,13 @@ public class Server {
 		server.start();
 		
 	}
-	public static String booleanValue(boolean b){
-		if (b) return "on";
-		else   return "off";
-	}
-	public static String keyUpdatify(String message, String s) {
-		if(s.charAt(0) == '+'){
-			message += s.substring(1);
-		}
-		else if(s.charAt(0) == '-'){
-			try{
-				int remove = Integer.parseInt(s.substring(1));
-				if(message.length() >= remove){
-					message  = message.substring(0, message.length() - remove);
-				}
-				else{
-					message = "";
-				}
-			}
-			catch(NumberFormatException nfr){
-				log(Level.SEVERE, nfr.toString());
-			}
-		}
-		return message;
-	}
 	/**
 	 * pretty much does all the work in here
 	 */
 	class Client extends Thread {
 		// the socket where to listen/talk
 		boolean keepGoing = true;
+		private Gson gson = new Gson();
 		Socket socket;
 		BufferedReader in;
 		PrintWriter out;
@@ -311,7 +235,7 @@ public class Server {
 		SimpleDateFormat dateFormat = new SimpleDateFormat("h:mm:ss");
 		ArrayList<Client> recents = new ArrayList<Client>();
 
-		public Client(Socket socket) {
+		public Client(Socket socket) throws Exception {
 			// give each a unique id
 			this.date = new Date();
 			this.socket = socket;
@@ -321,9 +245,8 @@ public class Server {
 				in  = new BufferedReader(new InputStreamReader(socket.getInputStream()));
 				this.username = in.readLine();
 				if(!validate(username, out)){
-					remove(this);
 					disconnect();
-					return;
+					throw new Exception("Username taken");
 				}
 				this.id = connectionId++;
 				log(Level.INFO,"connection accepted from " + socket.getInetAddress());
@@ -334,13 +257,20 @@ public class Server {
 				return;
 			}
 		}
-		// run forever
+		/**
+		 * Sends the list of contacts to client
+		 * grabs usernames from the list of connected clients
+		 * then forms a comma separated list and send the message
+		 * as a Contacts Return simple message
+		 */
 		public void sendContacts(){
 			String csv = ""; //comma separated values
-            for(int i = 0; i < connectedList.size(); i++) {
-            	csv += connectedList.get(i).username + ",";
+            for(Client c: connectedList) {
+            	csv += c.username;
+            	if(!c.equals(connectedList.get(connectedList.size() - 1)))
+            		csv += ",";
             }
-			send(false, 'c',csv);
+			send(new Message(Message.Type.Contacts, csv));
 		}
 		public void run() {
 			//broadcastExceptFor(true, id, '0', username + " connected");
@@ -349,49 +279,44 @@ public class Server {
 				/*TODO: FUNCTify */
 				try {
 					String line = in.readLine(); //blocking
+					
 					if(line == null) continue;
-					System.out.println(line);
-					switch(line.charAt(0)){
-						case '0': // message
-							broadcast(true, '0', username + ": " + line.substring(1));
+					Message m = gson.fromJson(line, Message.class);
+					/**
+					 * sign message so usernames can't be spoofed by client
+					 */
+					m.username = username;
+					//System.out.println(line);
+					switch(m.type){
+						case Message: // message
+						case Typing:  // typing just relays to client to be processed
+							if(m.contacts == null){
+								//broadcast
+								for(Client c: connectedList) {
+									c.send(m);
+								}
+								
+							}
+							else{
+								for(String to: m.contacts){
+									sendTo(m, to);
+								}
+							}
+							
 							break;
-						case '1': //logout;
+						case Logout: //logout;
 							keepGoing = false;
 							break;
+						case Command:
 							/*
-							 * commands flag to method to clean this up
+							 * for later use
 							 */
-						case '2': // isTyping
-							if(line.charAt(1) == '0'){ // done typing
-								message = "";
-								broadcastExceptFor(false, id, '2', "0");
-							}
-							else{ //is typing
-								if(realtime){
-									message = keyUpdatify(message, line.substring(2));
-									broadcastExceptFor(false, id, '2', "1" + username + ": " + message);
-								}
-								else broadcastExceptFor(false, id, '2', "1" + username + " is typing.");
-							}
 							break;
-						case '3': // enable/disable realtime
-							realtime = line.charAt(1) == '1';
-							send(true, '0', "Realtime " + booleanValue(realtime));
-							break;
-						case '4': //whoisin
-							whoisin();
-							break;
-						case '5': //to
-							String[] parts = line.substring(1).split(":", 2);
-							String to = parts[0];
-							String msg = parts[1];
-							sendTo(to,msg, username);
-						case 'c':
-							//contacts
+						case Contacts: //contacts
 							sendContacts();
 							break;
 						default:
-							send(false, 'E', "command not understood: " + line);
+							send(new Message(Message.Type.Error,"command not understood: " + line));
 							break;
 					}
 					
@@ -404,19 +329,26 @@ public class Server {
 			}
 			disconnect();
 		}
-		private void sendTo(String to, String message, String from){
+		private void remove(Client c) {
+			synchronized(connectedList){
+				connectedList.remove(c);
+			}
+			recents.remove(c);
+		}
+		private void sendTo(Message m, String to){
 			Client c = null;
 			synchronized(recents){
-				for(int i = 0; i <  recents.size(); i++){
-					if(to.equalsIgnoreCase(recents.get(i).username)){
-						c = recents.get(i);
+				for(Client r: recents){
+					if(to.equalsIgnoreCase(r.username)){
+						c = r;
+						log(Level.INFO, "found in recents cache");
 					}
 				}
 				if(c == null){
 					synchronized(connectedList){
-						for(int i = connectedList.size() - 1; i >= 0; i--) {
-							if(connectedList.get(i).username.equalsIgnoreCase(to)){
-								c = connectedList.get(i);
+						for(Client r: connectedList) {
+							if(r.username.equalsIgnoreCase(to)){
+								c = r;
 								recents.add(c);
 							}
 						}
@@ -424,13 +356,12 @@ public class Server {
 				}
 				if(c!= null){
 					// try to write to the Client if it fails remove it from the list
-					if(!c.send(true, '5', "PM "+ from + ": " + message)) {
-						connectedList.remove(c);
-						recents.remove(c);
+					if(!c.send(m)) {
+						c.disconnect();
 					}
 				}
 				else{
-					send(true, '0', "User not found");
+					send(new Message(Message.Type.Error, "User not found"));
 				}
 					
 			}
@@ -439,7 +370,7 @@ public class Server {
 
 		// try to close everything
 		private void disconnect() {
-			remove(id);
+			remove(this);
 			try{	
 				if(socket != null) socket.setKeepAlive(false);
 			}
@@ -461,29 +392,18 @@ public class Server {
 			}
 			catch (Exception e) {}
 		}
-		private void whoisin(){
-			send(false, '0', "List of the users connected at " + dateFormat.format(new Date()));
-            // scan al the users connected
-            for(int i = 0; i < connectedList.size(); i++) {
-            	Client c = connectedList.get(i);
-                send(false, '0', c.username + " online for " + (int)((new Date().getTime() - c.date.getTime())/1000) + " seconds");
-            }
-		}
-
 		/*
 		 * Write a String to the Client output stream
 		 */
-		private boolean send(boolean includeDate, char code, String s){
+		private boolean send(Message m){
 			if(!socket.isConnected()) {
 				disconnect();
 				return false;
 			}
-			// add HH:mm:ss
-			String time = "";
-			if(includeDate) time = new SimpleDateFormat("h:mm:ss: ").format(new Date());
-			out.println(code + time + s);
+			out.println(gson.toJson(m));
 			return true;
 		}
+
 
 	}
 	
