@@ -8,8 +8,9 @@ import java.net.Socket;
 import java.net.SocketException;
 import java.net.SocketTimeoutException;
 import java.text.SimpleDateFormat;
-import java.util.ArrayList;
 import java.util.Date;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.logging.FileHandler;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -23,33 +24,31 @@ public class Server {
   private static SimpleFormatter formatterTxt;
   private int port;
   private static int connectionId = 0;
-  // List of clients
-  private ArrayList<Client> connectedList;
-  private double version = 2.01;
+  private Map<String, Client> clientsList;
+  private double version = 2.02;
+  private final static String USAGE = "ChatterServer: \n\tUsage is: $> java Server [portNumber]\n";
   /****************************************************
-   * v2.0 new protocol bug fixes and optimizations new commands cleanup
+   * v2.02 efficiency and housekeeping
    ****************************************************/
   public volatile boolean keepGoing;
 
-  /*
-   * server constructor that receive the port to listen to for connection as parameter in console
-   */
   public Server(int port) {
     shutdownhook();
     this.port = port;
-    // ArrayList for the Client list
-    connectedList = new ArrayList<Client>();
+    this.clientsList = new HashMap<String, Client>();
   }
 
-  private boolean validate(String s, PrintWriter out) {
-    /*
-     * check if username is taken
-     */
-    for (int i = 0; i < connectedList.size(); i++) {
-      if (s.equalsIgnoreCase(connectedList.get(i).username)) {
-        out.println("0 username taken");
-        return false;
-      }
+  /**
+   * Validates username currently just checks to see if user is already taken
+   * 
+   * @param username
+   * @param out
+   * @return
+   */
+  private boolean validateUser(String username, PrintWriter out) {
+    if (clientsList.containsKey(username)) {
+      out.println("0 username taken");
+      return false;
     }
     out.println("1");
     return true;
@@ -64,30 +63,26 @@ public class Server {
     Runtime.getRuntime().addShutdownHook(new Thread() {
       @Override
       public void run() {
-        log(Level.INFO,
-            "Begin Shutdownhook...breaking connections, please allow 10 seconds for timeout");
+        log(Level.INFO, "Please wait... cleaning up");
         close();
         try {
           mainThread.join();
         } catch (InterruptedException e) {
-          // TODO Auto-generated catch block
           e.printStackTrace();
         }
-
         log(Level.INFO, "Done.");
       }
     });
   }
 
   public void close() {
-    for (int i = 0; i < connectedList.size(); i++) {
-      Client tc = connectedList.get(i);
+    for (Client client : clientsList.values()) {
       try {
-        tc.in.close();
-        tc.out.close();
-        tc.socket.close();
-      } catch (IOException ioE) {
-        log(Level.SEVERE, ioE.toString());
+        client.in.close();
+        client.out.close();
+        client.socket.close();
+      } catch (IOException e) {
+        log(Level.SEVERE, e.toString());
       }
     }
     log(Level.INFO, "Closing");
@@ -107,10 +102,9 @@ public class Server {
       // infinite loop to wait for connections
       log(Level.INFO, "Server waiting for Clients on port " + port + ".");
       while (keepGoing) {
-
         Socket socket;
         try {
-          socket = serverSocket.accept(); // accept connection
+          socket = serverSocket.accept(); // block and wait to accept a connection
         } catch (SocketTimeoutException ste) {
           socket = null;
         }
@@ -125,19 +119,12 @@ public class Server {
           if (!keepGoing)
             break;
           try {
-            Client t = new Client(socket); // make a thread of it
-            connectedList.add(t); // save it in the ArrayList
+            Client client = new Client(socket); // make a thread of it
+            clientsList.put(client.username, client);
           } catch (Exception e) {
-            log(Level.WARNING, "did not connect");
+            log(Level.WARNING, "Could not connect user");
           }
 
-        }
-        try {
-          Thread.sleep(1000);
-        } catch (InterruptedException e) {
-          // TODO Auto-generated catch block
-          e.printStackTrace();
-          break;
         }
       }
       // I was asked to stop
@@ -225,7 +212,8 @@ public class Server {
     // the Username of the Client
     String username = "";
     SimpleDateFormat dateFormat = new SimpleDateFormat("h:mm:ss");
-    ArrayList<Client> recents = new ArrayList<Client>();
+
+    // ArrayList<Client> recents = new ArrayList<Client>();
 
     public Client(Socket socket) throws Exception {
       // give each a unique id
@@ -236,7 +224,7 @@ public class Server {
         out = new PrintWriter(socket.getOutputStream(), true);
         in = new BufferedReader(new InputStreamReader(socket.getInputStream()));
         this.username = in.readLine();
-        if (!validate(username, out)) {
+        if (!validateUser(username, out)) {
           disconnect();
           throw new Exception("Username taken");
         }
@@ -250,67 +238,65 @@ public class Server {
     }
 
     /**
-     * Sends the list of contacts to client grabs usernames from the list of connected clients then
-     * forms a comma separated list and send the message as a Contacts Return simple message
+     * Creates a contacts list message
+     * 
+     * @return
      */
-    public void sendContacts() {
+    public Message createContactsMessage() {
       String csv = ""; // comma separated values
-      for (Client c : connectedList) {
-        csv += c.username;
-        if (!c.equals(connectedList.get(connectedList.size() - 1)))
-          csv += ",";
+      for (String username : clientsList.keySet()) {
+        csv += username + ",";
       }
-      send(new Message(Message.Type.Contacts, csv));
+      username.replaceFirst(",$", ""); // remove last comma
+      return new Message(Message.Type.Contacts, csv);
     }
 
+    private void messageLoop(Message message, String line) {
+      switch (message.type) {
+        case Message: // message
+        case Typing: // typing just relays to client to be processed
+          if (message.contacts == null) {
+            // broadcast
+            for (Client c : clientsList.values()) {
+              c.send(message);
+            }
+
+          } else {
+            for (String to : message.contacts) {
+              sendTo(message, to);
+            }
+          }
+
+          break;
+        case Logout: // logout;
+          keepGoing = false;
+          break;
+        case Command:
+          /*
+           * for later use
+           */
+          break;
+        case Contacts: // contacts
+          send(createContactsMessage());
+          break;
+        default:
+          send(new Message(Message.Type.Error, "command not understood: " + line));
+          break;
+      }
+    }
+
+    @Override
     public void run() {
       // broadcastExceptFor(true, id, '0', username + " connected");
       while (keepGoing) {
-        // read a String (which is an object)
-        /* TODO: FUNCTify */
         try {
           String line = in.readLine(); // blocking
-
           if (line == null)
             continue;
-          Message m = gson.fromJson(line, Message.class);
-          /**
-           * sign message so usernames can't be spoofed by client
-           */
-          m.username = username;
-          // System.out.println(line);
-          switch (m.type) {
-            case Message: // message
-            case Typing: // typing just relays to client to be processed
-              if (m.contacts == null) {
-                // broadcast
-                for (Client c : connectedList) {
-                  c.send(m);
-                }
-
-              } else {
-                for (String to : m.contacts) {
-                  sendTo(m, to);
-                }
-              }
-
-              break;
-            case Logout: // logout;
-              keepGoing = false;
-              break;
-            case Command:
-              /*
-               * for later use
-               */
-              break;
-            case Contacts: // contacts
-              sendContacts();
-              break;
-            default:
-              send(new Message(Message.Type.Error, "command not understood: " + line));
-              break;
-          }
-
+          Message message = gson.fromJson(line, Message.class);
+          // sign message so usernames can't be spoofed by client
+          message.username = username;
+          messageLoop(message, line);
 
         } catch (IOException e) {
           log(Level.SEVERE, username + " Exception reading Streams: " + e);
@@ -321,45 +307,30 @@ public class Server {
     }
 
     private void remove(Client c) {
-      synchronized (connectedList) {
-        connectedList.remove(c);
+      synchronized (clientsList) {
+        clientsList.remove(c.username);
       }
-      recents.remove(c);
     }
 
-    private void sendTo(Message m, String to) {
-      Client c = null;
-      synchronized (recents) {
-        for (Client r : recents) {
-          if (to.equalsIgnoreCase(r.username)) {
-            c = r;
-            log(Level.INFO, "found in recents cache");
-          }
+    private void sendTo(Message message, String to) {
+      Client client = null;
+      synchronized (clientsList) {
+        client = clientsList.get(to);
+      }
+      if (client != null) {
+        // try to write to the Client if it fails remove it from the list
+        if (!client.send(message)) {
+          client.disconnect();
         }
-        if (c == null) {
-          synchronized (connectedList) {
-            for (Client r : connectedList) {
-              if (r.username.equalsIgnoreCase(to)) {
-                c = r;
-                recents.add(c);
-              }
-            }
-          }
-        }
-        if (c != null) {
-          // try to write to the Client if it fails remove it from the list
-          if (!c.send(m)) {
-            c.disconnect();
-          }
-        } else {
-          send(new Message(Message.Type.Error, "User not found"));
-        }
-
+      } else {
+        send(new Message(Message.Type.Error, "User not found"));
       }
 
     }
 
-    // try to close everything
+    /**
+     * Try to close everything related to this client
+     */
     private void disconnect() {
       remove(this);
       try {
@@ -387,19 +358,17 @@ public class Server {
       }
     }
 
-    /*
+    /**
      * Write a String to the Client output stream
      */
-    private boolean send(Message m) {
+    private boolean send(Message message) {
       if (!socket.isConnected()) {
         disconnect();
         return false;
       }
-      out.println(gson.toJson(m));
+      out.println(gson.toJson(message));
       return true;
     }
 
-
   }
-
 }
